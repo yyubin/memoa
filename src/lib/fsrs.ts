@@ -7,6 +7,22 @@ export type Grade = 1 | 2 | 3 | 4
 type Scheduler = Awaited<ReturnType<typeof DefaultScheduler<'FSRS-7'>>>
 type DefaultSchedulerCard = Parameters<Scheduler['review']>[0]['card']
 let schedulerPromise: Promise<Scheduler> | null = null
+let userWeights: number[] | null = null
+
+/** FSRS-7 매개변수 개수 (개인 최적화 결과 검증용) */
+export const FSRS7_PARAM_COUNT = 34
+
+/** 개인 최적화된 매개변수를 쓰도록 설정 (null = 기본값). 다음 계산부터 적용 */
+export function setUserWeights(weights: number[] | null | undefined) {
+  const next = weights && weights.length === FSRS7_PARAM_COUNT && weights.every(Number.isFinite) ? [...weights] : null
+  if (JSON.stringify(next) === JSON.stringify(userWeights)) return
+  userWeights = next
+  schedulerPromise = null
+}
+
+export function usingPersonalWeights() {
+  return userWeights !== null
+}
 
 export function getScheduler(): Promise<Scheduler> {
   schedulerPromise ??= DefaultScheduler({
@@ -16,6 +32,7 @@ export function getScheduler(): Promise<Scheduler> {
     learningSteps: ['1m', '10m'],
     relearningSteps: ['10m'],
     maximumInterval: 3650,
+    ...(userWeights ? { weights: userWeights } : {}),
   })
   return schedulerPromise
 }

@@ -1,14 +1,15 @@
 <script lang="ts">
   import { onMount, onDestroy, tick } from 'svelte'
-  import { getDeck, listNotes, listCards, todayLogs, writeReview, undoReview, setSuspended, dayEnd, type ReviewWrite } from '../lib/api'
-  import { deckSettings, KINDS } from '../lib/kinds'
+  import { getDeck, listNotes, listCards, todayLogs, writeReview, undoReview, setSuspended, markLeech, dayEnd, type ReviewWrite } from '../lib/api'
+  import { loadProfile } from '../lib/profile.svelte'
+  import { deckSettings, KINDS, becameLeech, lapsesOf, LEECH_TAG } from '../lib/kinds'
   import { StudyQueue } from '../lib/session'
   import { buildQuestion, gradeTyped, suggestGrade, speak, type Question, type TypedVerdict } from '../lib/quiz'
-  import { reviewCard, previewIntervals, formatInterval, type Grade } from '../lib/fsrs'
+  import { reviewCard, previewIntervals, formatInterval, setUserWeights, type Grade } from '../lib/fsrs'
   import { toast, errorText } from '../lib/toast.svelte'
-  import type { CardRow, Deck, SentenceData, VocabData } from '../lib/types'
+  import type { CardRow, Deck, DeckSettings, SentenceData, VocabData } from '../lib/types'
   import TopBar from '../components/TopBar.svelte'
-  import Mascot from '../components/Mascot.svelte'
+  import MyChar from '../components/MyChar.svelte'
   import Sentence from '../components/Sentence.svelte'
 
   let { deckId }: { deckId: string } = $props()
@@ -30,22 +31,27 @@
   let finished = $state(false)
   let nextAt = $state<Date | null>(null)
   let startedAt = 0
-  let undoStack: { w: ReviewWrite; touched: boolean }[] = []
+  let undoStack: { w: ReviewWrite; touched: boolean; leechSuspended: boolean }[] = []
+  let settings: DeckSettings | null = null
   let typeInput = $state<HTMLInputElement | null>(null)
   let timer: ReturnType<typeof setInterval> | undefined
 
+  // 색 대신 기호 + 테두리 스타일로 구분 (다시=점선 ✗, 어려워=△, 알맞아=○, 쉬워=◎)
   const GRADES: { g: Grade; label: string; face: string; cls: string }[] = [
-    { g: 1, label: '다시', face: '😿', cls: 'again' },
-    { g: 2, label: '어려워', face: '😥', cls: 'hard' },
-    { g: 3, label: '알맞아', face: '😺', cls: 'good' },
-    { g: 4, label: '쉬워', face: '😻', cls: 'easy' },
+    { g: 1, label: '다시', face: '✗', cls: 'again' },
+    { g: 2, label: '어려워', face: '△', cls: 'hard' },
+    { g: 3, label: '알맞아', face: '○', cls: 'good' },
+    { g: 4, label: '쉬워', face: '◎', cls: 'easy' },
   ]
 
   async function load() {
     try {
-      const [d, notes, cards, logs] = await Promise.all([getDeck(deckId), listNotes(deckId), listCards(deckId), todayLogs()])
+      const [d, notes, cards, logs, profile] = await Promise.all([getDeck(deckId), listNotes(deckId), listCards(deckId), todayLogs(), loadProfile()])
+      // 개인 최적화된 FSRS 매개변수가 있으면 사용
+      setUserWeights(profile.settings.fsrs?.weights)
       deck = d
-      queue = new StudyQueue(cards, notes, logs, deckSettings(d), dayEnd())
+      settings = deckSettings(d)
+      queue = new StudyQueue(cards, notes, logs, settings, dayEnd())
       doneToday = logs.filter((l) => notes.some((n) => n.id === l.note_id)).length
       await advance()
     } catch (e) {
@@ -120,7 +126,8 @@
       const touched = queue.wasTouched(before)
       await writeReview(w)
       queue.applyReview(before, next)
-      undoStack.push({ w, touched })
+      const leechSuspended = await checkLeech(before, next)
+      undoStack.push({ w, touched, leechSuspended })
       doneToday++
       await advance()
     } catch (e) {
@@ -130,12 +137,31 @@
     }
   }
 
+  /** 이번 평가로 '어려운 카드'가 됐으면 태그를 붙이고 (설정에 따라) 숨김. 숨겼으면 true */
+  async function checkLeech(before: CardRow, next: Pick<CardRow, 'fsrs'>): Promise<boolean> {
+    if (!queue || !settings) return false
+    if (!becameLeech(lapsesOf(before.fsrs), lapsesOf(next.fsrs), settings.leechThreshold)) return false
+    const note = queue.note(before)
+    const suspend = settings.leechAction === 'suspend'
+    try {
+      await markLeech(note.id, before.id, suspend)
+      if (!note.tags.includes(LEECH_TAG)) note.tags = [...note.tags, LEECH_TAG]
+      if (suspend) queue.suspend(before.id)
+      toast(suspend ? `⚠ "${note.word}" 은(는) 어려운 카드라 잠시 숨겼어요` : `⚠ "${note.word}" 을(를) 어려운 카드로 표시했어요`)
+      return suspend
+    } catch (e) {
+      toast(errorText(e), 'error')
+      return false
+    }
+  }
+
   async function undo() {
     const last = undoStack.pop()
     if (!last || !queue || saving) return
     saving = true
     try {
       await undoReview(last.w)
+      if (last.leechSuspended) await setSuspended(last.w.card.id, false)
       queue.undo(last.w.card as CardRow, last.touched)
       doneToday--
       await advance()
@@ -174,10 +200,10 @@
   }
 
   const VERDICT_TEXT: Record<TypedVerdict, string> = {
-    correct: '정답! 😺',
-    close: '아깝다! 철자 한 글자 차이 😼',
-    synonym: '유의어예요! 하지만 정답은 따로 있어요 🙀',
-    wrong: '틀렸어요 😿',
+    correct: '✓ 정답!',
+    close: '△ 아깝다! 철자 한 글자 차이',
+    synonym: '≈ 유의어예요! 하지만 정답은 따로 있어요',
+    wrong: '✗ 틀렸어요',
   }
 
   onMount(() => {
@@ -197,16 +223,16 @@
 </TopBar>
 
 {#if loading}
-  <div class="center"><Mascot size={72} /></div>
+  <div class="center"><MyChar size={110} /></div>
 {:else if finished}
   <div class="done box pop">
-    <Mascot size={110} mood={nextAt ? 'happy' : 'sleep'} />
+    <MyChar size={170} sparkles={!nextAt} />
     {#if nextAt}
       <h2>잠깐 쉬어가요 ☕</h2>
       <p>방금 배운 카드를 <b>{formatInterval(nextAt.getTime() - Date.now())}</b> 뒤에 다시 볼게요.<br />이 화면을 켜두면 자동으로 이어져요.</p>
     {:else}
-      <h2>오늘 공부 끝! 🎉</h2>
-      <p>오늘 <b>{doneToday}</b>장을 모았어요. 내일 또 만나요 냥~</p>
+      <h2>오늘 공부 끝! ✦</h2>
+      <p>오늘 <b>{doneToday}</b>장을 모았어요. 내일 또 만나요!</p>
     {/if}
     <div class="row center-row">
       <a class="btn" href={`#/deck/${deckId}`}>단어장으로</a>
@@ -219,6 +245,7 @@
     <span class="chip c-learn">학습 {counts.learn}</span>
     <span class="chip c-review">복습 {counts.review}</span>
     <span class="spacer"></span>
+    {#if q.note.tags.includes(LEECH_TAG)}<span class="chip leech" title="자주 까먹는 단어예요. 예문을 다시 읽거나 뜻을 고쳐보세요">⚠ 어려운 카드</span>{/if}
     <span class="chip kind">{KINDS[q.kind].emoji} {KINDS[q.kind].label}</span>
   </div>
 
@@ -281,7 +308,10 @@
               disabled={revealed}
               onclick={() => choose(i)}
             >
-              <span class="n">{i + 1}</span> {opt}
+              <span class="n">{i + 1}</span>
+              <span class="otext">{opt}</span>
+              {#if revealed && i === q.answerIdx}<span class="mark" aria-label="정답">✓</span>
+              {:else if revealed && chosen === i}<span class="mark" aria-label="오답">✗</span>{/if}
             </button>
           {/each}
         </div>
@@ -349,9 +379,10 @@
       <div class="grades">
         {#each GRADES as gr}
           <button class="grade {gr.cls}" class:suggest={suggested === gr.g} onclick={() => rate(gr.g)} disabled={saving}>
-            <span class="face">{gr.face}</span>
+            <span class="face" aria-hidden="true">{gr.face}</span>
             <span class="title">{gr.label}</span>
             <small>{intervals?.[gr.g] ?? '…'}</small>
+            <span class="key" aria-hidden="true">{gr.g}</span>
           </button>
         {/each}
       </div>
@@ -367,9 +398,9 @@
 <style>
   .center { display: grid; place-items: center; min-height: 50vh; }
   .counts { flex-wrap: wrap; margin-bottom: 12px; }
-  .c-new { background: var(--mint-soft); }
-  .c-learn { background: var(--berry-soft); }
-  .c-review { background: var(--sky-soft); }
+  .c-new { background: var(--card); }
+  .c-learn { background: var(--card); border-style: dashed; }
+  .c-review { background: var(--ink); color: var(--bg); }
   .kind { background: var(--card); }
 
   .qcard { padding: 24px 20px; display: grid; gap: 12px; min-height: 260px; align-content: start; }
@@ -394,15 +425,20 @@
     box-shadow: 2px 2px 0 var(--line);
   }
   .opt:hover:not(:disabled) { background: var(--butter-soft); }
+  .otext { flex: 1; min-width: 0; }
+  .mark { font-family: var(--font-title); font-size: 20px; line-height: 1; flex: none; }
   .opt:disabled { cursor: default; color: inherit; }
   .opt .n { font-family: var(--font-title); width: 26px; height: 26px; display: grid; place-items: center; border: 2px solid var(--line); border-radius: 50%; font-size: 14px; flex: none; }
-  .opt.right { background: var(--mint-soft); }
-  .opt.wrong { background: var(--berry-soft); text-decoration: line-through; }
+  /* 정답 = 검정으로 채운 반전, 오답 = 점선 + 취소선 + 흐리게 */
+  .opt.right { background: var(--ink); color: var(--bg); box-shadow: none; }
+  .opt.right .n { border-color: var(--bg); }
+  .opt.wrong { border-style: dashed; box-shadow: none; opacity: .75; }
+  .opt.wrong .otext { text-decoration: line-through; text-decoration-thickness: 2px; }
 
   .typerow { margin-top: 6px; }
   .typein { font-size: 20px; text-align: center; }
-  .typein.ok { background: var(--mint-soft); }
-  .typein.bad { background: var(--berry-soft); }
+  .typein.ok { background: var(--ink); color: var(--bg); -webkit-text-fill-color: var(--bg); opacity: 1; }
+  .typein.bad { border-style: dashed; text-decoration: line-through; text-decoration-thickness: 2px; opacity: 1; }
   .verdict { text-align: center; margin: 0; font-family: var(--font-title); font-size: 18px; }
 
   .answer { border-top: 2.5px dashed var(--ink-soft); padding-top: 14px; margin-top: 6px; display: grid; gap: 10px; }
@@ -417,21 +453,21 @@
   .grade {
     display: grid; justify-items: center; gap: 0; padding: 8px 4px;
     border: 2.5px solid var(--line); border-radius: 16px; cursor: pointer;
-    box-shadow: var(--shadow); color: #3a2a24;
+    background: var(--card); color: var(--ink); box-shadow: var(--shadow); position: relative;
     transition: transform .08s ease;
   }
   .grade:active { transform: translate(2px, 2px); box-shadow: 1px 1px 0 var(--line); }
-  .grade .face { font-size: 24px; }
+  .grade .face { font-family: var(--font-title); font-size: 22px; line-height: 1.2; }
+  .grade .key { position: absolute; top: 4px; right: 8px; font-family: var(--font-mono); font-size: 10px; opacity: .6; }
   .grade .title { font-size: 16px; }
   .grade small { font-size: 12px; opacity: .8; }
-  .grade.again { background: #ffb3c1; }
-  .grade.hard { background: #ffd8a8; }
-  .grade.good { background: #b5ead7; }
-  .grade.easy { background: #a8d8ff; }
-  .grade.suggest { outline: 3px solid var(--peach); outline-offset: 3px; transform: translateY(-3px); }
+  .grade.again { border-style: dashed; }
+  /* 추천 평가 = 검정으로 채워 반전 */
+  .grade.suggest { background: var(--ink); color: var(--bg); transform: translateY(-3px); }
   .tools { margin-top: 8px; }
 
   .done { padding: 32px 20px; text-align: center; display: grid; justify-items: center; gap: 10px; }
   .done h2 { font-size: 28px; }
   .center-row { justify-content: center; flex-wrap: wrap; }
+  .leech { border-style: dashed; font-weight: 700; }
 </style>

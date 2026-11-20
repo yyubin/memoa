@@ -1,7 +1,7 @@
 <script lang="ts">
   import { supabase } from '../lib/supabase'
   import { toast, errorText } from '../lib/toast.svelte'
-  import Mascot from '../components/Mascot.svelte'
+  import MyChar from '../components/MyChar.svelte'
 
   let mode = $state<'login' | 'signup'>('login')
   let email = $state('')
@@ -49,9 +49,9 @@
 
 <div class="wrap">
   <div class="hero">
-    <Mascot size={96} />
+    <MyChar size={150} sparkles />
     <h1>메모아</h1>
-    <p class="muted">냥냥 단어 모아모아 🐾</p>
+    <p class="muted">단어를 외우면 캐릭터가 레벨업 ✦</p>
   </div>
 
   {#if sent}
@@ -98,7 +98,7 @@
   .panel { padding: 22px; }
   .tabs { display: grid; grid-template-columns: 1fr 1fr; border: 2.5px solid var(--line); border-radius: 999px; overflow: hidden; }
   .tabs button { border: 0; background: transparent; padding: 8px; font-family: var(--font-title); font-size: 17px; cursor: pointer; }
-  .tabs button.on { background: var(--butter); color: #3d3214; }
+  .tabs button.on { background: var(--ink); color: var(--bg); }
   .code { text-transform: uppercase; letter-spacing: 2px; }
   small { color: var(--ink-soft); font-size: 12px; }
 </style>

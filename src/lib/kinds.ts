@@ -11,7 +11,7 @@ export const KINDS: Record<CardKind, KindInfo> = {
   meaning_ko: { label: '뜻 맞히기', emoji: '🍙', desc: '단어 보고 한글 뜻 떠올리기', noteType: 'vocab' },
   meaning_en: { label: '영영 뜻', emoji: '📖', desc: '단어 보고 영어 정의 떠올리기', noteType: 'vocab' },
   recall: { label: '단어 떠올리기', emoji: '✍️', desc: '뜻 보고 단어 직접 쓰기', noteType: 'vocab' },
-  synonym: { label: '동의어 (토플형)', emoji: '🔁', desc: '"closest in meaning to" 4지선다', noteType: 'vocab' },
+  synonym: { label: '동의어 고르기', emoji: '🔁', desc: '예문 속 단어와 뜻이 가장 가까운 말 고르기 (4지선다)', noteType: 'vocab' },
   antonym: { label: '반의어', emoji: '🙃', desc: '반대말 고르기', noteType: 'vocab' },
   cloze: { label: '예문 빈칸', emoji: '🧩', desc: '예문 빈칸에 알맞은 형태 쓰기', noteType: 'vocab' },
   listen: { label: '듣고 쓰기', emoji: '🎧', desc: '발음 듣고 철자 쓰기', noteType: 'vocab' },
@@ -24,6 +24,26 @@ export const ALL_KINDS = Object.keys(KINDS) as CardKind[]
 export const DEFAULT_SETTINGS: DeckSettings = {
   newPerDay: 20,
   kinds: ALL_KINDS.filter((k) => k !== 'listen'),
+  newMix: 'mix',
+  leechThreshold: 8,
+  leechAction: 'tag',
+}
+
+/** 노트 태그: 어려운 카드(leech)가 하나라도 있으면 붙음 */
+export const LEECH_TAG = 'leech'
+
+/**
+ * 이번 평가로 '어려운 카드'가 됐는지. Anki 방식:
+ * 까먹은 횟수가 기준에 처음 닿을 때, 그 뒤로는 기준의 절반마다 다시 알림.
+ */
+export function becameLeech(lapsesBefore: number, lapsesAfter: number, threshold: number): boolean {
+  if (threshold <= 0 || lapsesAfter <= lapsesBefore || lapsesAfter < threshold) return false
+  const step = Math.max(1, Math.ceil(threshold / 2))
+  return (lapsesAfter - threshold) % step === 0
+}
+
+export function lapsesOf(fsrs: object | null | undefined): number {
+  return Number((fsrs as { lapses?: unknown } | null)?.lapses ?? 0) || 0
 }
 
 export function deckSettings(deck: Deck): DeckSettings {

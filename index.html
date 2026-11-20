@@ -5,13 +5,14 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self' https://cslrrflgovmyvfartanc.supabase.co wss://cslrrflgovmyvfartanc.supabase.co; base-uri 'none'; form-action 'self'; object-src 'none'"
+      content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self' blob:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self' https://cslrrflgovmyvfartanc.supabase.co wss://cslrrflgovmyvfartanc.supabase.co; base-uri 'none'; form-action 'self'; object-src 'none'"
     />
-    <meta name="theme-color" content="#FFF6EC" />
+    <meta name="theme-color" content="#F6F3EE" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#121212" media="(prefers-color-scheme: dark)" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=Jua&family=Gowun+Dodum&display=swap" rel="stylesheet" />
+    <link crossorigin="anonymous" href="https://fonts.googleapis.com/css2?family=Archivo+Black&family=Black+Han+Sans&family=Gothic+A1:wght@400;700;800&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet" />
     <title>메모아</title>
   </head>
   <body>

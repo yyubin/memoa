@@ -1,6 +1,7 @@
 import { supabase } from './supabase'
-import { desiredCards } from './kinds'
-import type { CardRow, Deck, Note, NoteType, Profile, ReviewLogRow, SentenceData, VocabData } from './types'
+import { desiredCards, LEECH_TAG } from './kinds'
+import { expFromRatingCounts } from './levels'
+import type { CardRow, Deck, Note, NoteType, Profile, ProfileSettings, ReviewLogRow, SentenceData, VocabData } from './types'
 
 type Result<T> = PromiseLike<{ data: T[] | null; error: unknown }>
 
@@ -43,7 +44,16 @@ export function dayEnd(now = new Date()): Date {
 // ─────────────── 프로필 / 초대 ───────────────
 
 export async function getProfile(): Promise<Profile> {
-  return check(await supabase.from('profiles').select('id, nickname, is_admin').single())
+  const p = check(await supabase.from('profiles').select('id, nickname, is_admin, settings').single()) as Profile
+  return { ...p, settings: p.settings ?? {} }
+}
+
+/** profiles.settings 에 patch 를 합쳐 저장하고, 저장된 전체 설정을 돌려준다 */
+export async function updateSettings(patch: Partial<ProfileSettings>): Promise<ProfileSettings> {
+  const cur = check(await supabase.from('profiles').select('id, settings').single()) as Pick<Profile, 'id' | 'settings'>
+  const settings = { ...(cur.settings ?? {}), ...patch }
+  check(await supabase.from('profiles').update({ settings }).eq('id', cur.id))
+  return settings
 }
 
 export async function updateNickname(nickname: string) {
@@ -181,6 +191,19 @@ export async function todayLogs(): Promise<ReviewLogRow[]> {
   )
 }
 
+/** 지금까지의 모든 복습으로 쌓은 EXP (평가별 head count 4번 — 행을 내려받지 않음) */
+export async function totalExp(): Promise<number> {
+  const res = await Promise.all(
+    ([1, 2, 3, 4] as const).map((r) => supabase.from('review_logs').select('id', { count: 'exact', head: true }).eq('rating', r)),
+  )
+  const counts: Partial<Record<1 | 2 | 3 | 4, number>> = {}
+  res.forEach((x, i) => {
+    if (x.error) throw x.error
+    counts[(i + 1) as 1 | 2 | 3 | 4] = x.count ?? 0
+  })
+  return expFromRatingCounts(counts)
+}
+
 export interface ReviewWrite {
   card: Pick<CardRow, 'id' | 'note_id' | 'fsrs' | 'due' | 'state'>
   next: Pick<CardRow, 'fsrs' | 'due' | 'state'>
@@ -250,4 +273,42 @@ export interface PhotoResponse {
 
 export function extractPhoto(image: { base64: string; mediaType: string }, hint = ''): Promise<PhotoResponse> {
   return invokeAI<PhotoResponse>({ mode: 'photo', image: image.base64, media_type: image.mediaType, hint })
+}
+
+// ─────────────── FSRS 최적화 / 어려운 카드 ───────────────
+
+export interface HistoryRow {
+  card_id: string
+  rating: number
+  reviewed_at: string
+  duration_ms: number | null
+  prev_state: number | null
+}
+
+/** 내 전체 복습 기록 (최적화용) */
+export async function reviewHistory(): Promise<HistoryRow[]> {
+  return fetchAll<HistoryRow>((from, to) =>
+    supabase
+      .from('review_logs')
+      .select('card_id, rating, reviewed_at, duration_ms, prev_state:card_before->state')
+      .order('reviewed_at')
+      .order('id')
+      .range(from, to) as unknown as PromiseLike<{ data: HistoryRow[] | null; error: unknown }>,
+  )
+}
+
+/** 노트에 '어려운 카드' 태그를 붙이고, 필요하면 그 카드를 숨김 */
+export async function markLeech(noteId: string, cardId: string, suspend: boolean) {
+  const note = check(await supabase.from('notes').select('tags').eq('id', noteId).single()) as { tags: string[] }
+  if (!note.tags.includes(LEECH_TAG)) {
+    check(await supabase.from('notes').update({ tags: [...note.tags, LEECH_TAG] }).eq('id', noteId))
+  }
+  if (suspend) check(await supabase.from('cards').update({ suspended: true }).eq('id', cardId))
+}
+
+/** '어려운 카드' 태그를 떼고, 이 단어의 숨긴 카드를 다시 보이게 함 */
+export async function clearLeech(noteId: string) {
+  const note = check(await supabase.from('notes').select('tags').eq('id', noteId).single()) as { tags: string[] }
+  check(await supabase.from('notes').update({ tags: note.tags.filter((t) => t !== LEECH_TAG) }).eq('id', noteId))
+  check(await supabase.from('cards').update({ suspended: false }).eq('note_id', noteId).eq('suspended', true))
 }

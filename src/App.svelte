@@ -1,8 +1,10 @@
 <script lang="ts">
+  import { untrack } from 'svelte'
   import { auth } from './lib/auth.svelte'
   import { route, match } from './lib/router.svelte'
   import Toasts from './components/Toasts.svelte'
-  import Mascot from './components/Mascot.svelte'
+  import MyChar from './components/MyChar.svelte'
+  import { loadProfile, clearProfile } from './lib/profile.svelte'
   import Login from './routes/Login.svelte'
   import Home from './routes/Home.svelte'
   import DeckPage from './routes/Deck.svelte'
@@ -21,10 +23,20 @@
     if (match('/me', p)) return { name: 'me', id: '' }
     return { name: 'home', id: '' }
   })
+
+  // 로그인한 사용자가 바뀌면 프로필(직업)을 한 번 불러온다 — 캐릭터 그림이 앱 전체에서 쓰임
+  const userId = $derived(auth.session?.user.id ?? null)
+  $effect(() => {
+    const id = userId
+    untrack(() => {
+      clearProfile()
+      if (id) loadProfile(true).catch(() => {})
+    })
+  })
 </script>
 
 {#if auth.loading}
-  <div class="center"><Mascot size={72} /></div>
+  <div class="center"><MyChar size={96} sparkles /></div>
 {:else if !auth.session}
   <Login />
 {:else}
@@ -47,7 +59,11 @@
   main {
     max-width: 720px;
     margin: 0 auto;
-    padding: 16px 16px calc(32px + env(safe-area-inset-bottom));
+    padding:
+      calc(12px + env(safe-area-inset-top))
+      max(16px, env(safe-area-inset-right))
+      calc(32px + env(safe-area-inset-bottom))
+      max(16px, env(safe-area-inset-left));
   }
   .center { min-height: 100dvh; display: grid; place-items: center; }
 </style>

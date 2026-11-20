@@ -21,6 +21,8 @@
     "vitest": "^4.1.12"
   },
   "dependencies": {
+    "@open-spaced-repetition/binding": "^0.6.1",
+    "@open-spaced-repetition/binding-wasm32-wasi": "^0.6.1",
     "@supabase/supabase-js": "^2.119.2",
     "ts-fsrs": "^6.0.0"
   }

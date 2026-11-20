@@ -16,6 +16,10 @@ export class StudyQueue {
   private touched = new Map<string, Set<string>>() // note_id → 오늘 본 card_id
   private newLeft: number
   private enabled: Set<CardKind>
+  /** 섞기 모드: 이번 세션에서 보여준 새 카드 / 복습 카드 수, 목표 새 카드 비율 */
+  private shownNew = 0
+  private shownReview = 0
+  private newRatio = 0
 
   constructor(
     cards: CardRow[],
@@ -30,6 +34,8 @@ export class StudyQueue {
     for (const l of logs) this.touch(l.note_id, l.card_id)
     const newToday = logs.filter((l) => l.was_new).length
     this.newLeft = Math.max(0, settings.newPerDay - newToday)
+    const c = this.counts()
+    this.newRatio = c.fresh + c.review > 0 ? c.fresh / (c.fresh + c.review) : 0
   }
 
   private touch(noteId: string, cardId: string) {
@@ -89,20 +95,34 @@ export class StudyQueue {
     const review = enabled
       .filter((c) => c.state === 2 && +new Date(c.due) <= this.endOfDay.getTime() && !this.buried(c))
       .sort(byDue)
-    if (review.length) return review[0]
+    const fresh = this.newLeft > 0
+      ? enabled
+          .filter((c) => c.state === 0 && !this.buried(c) && this.unlocked(c))
+          .sort((a, b) => {
+            const na = this.notes.get(a.note_id)!, nb = this.notes.get(b.note_id)!
+            return na.created_at.localeCompare(nb.created_at) || KIND_ORDER.indexOf(a.kind) - KIND_ORDER.indexOf(b.kind)
+          })
+      : []
 
-    if (this.newLeft > 0) {
-      const fresh = enabled
-        .filter((c) => c.state === 0 && !this.buried(c) && this.unlocked(c))
-        .sort((a, b) => {
-          const na = this.notes.get(a.note_id)!, nb = this.notes.get(b.note_id)!
-          return na.created_at.localeCompare(nb.created_at) || KIND_ORDER.indexOf(a.kind) - KIND_ORDER.indexOf(b.kind)
-        })
-      if (fresh.length) return fresh[0]
-    }
+    if (review.length && fresh.length) return this.preferNew() ? fresh[0] : review[0]
+    if (review.length) return review[0]
+    if (fresh.length) return fresh[0]
 
     const ahead = learning.find((c) => +new Date(c.due) <= t + LEARN_AHEAD_MS)
     return ahead ?? null
+  }
+
+  /** 새 카드와 복습 카드가 둘 다 남았을 때 새 카드를 줄 차례인지 */
+  private preferNew(): boolean {
+    switch (this.settings.newMix) {
+      case 'before': return true
+      case 'after': return false
+      default: {
+        // 세션 시작 때 남은 새 카드 비율대로 고르게 섞음 (예: 복습 80 + 새 20 → 대략 4:1)
+        const shown = this.shownNew + this.shownReview
+        return this.shownNew < this.newRatio * (shown + 1)
+      }
+    }
   }
 
   /** 오늘 안에 다시 볼 학습 카드가 남았으면 그 시각 */
@@ -122,13 +142,15 @@ export class StudyQueue {
   }
 
   applyReview(card: CardRow, next: Pick<CardRow, 'fsrs' | 'due' | 'state'>) {
-    if (card.state === 0) this.newLeft--
+    if (card.state === 0) { this.newLeft--; this.shownNew++ }
+    else if (card.state === 2) this.shownReview++
     this.cards.set(card.id, { ...card, ...next })
     this.touch(card.note_id, card.id)
   }
 
   undo(card: CardRow, wasTouchedBefore: boolean) {
-    if (card.state === 0) this.newLeft++
+    if (card.state === 0) { this.newLeft++; this.shownNew-- }
+    else if (card.state === 2) this.shownReview--
     this.cards.set(card.id, card)
     if (!wasTouchedBefore) this.touched.get(card.note_id)?.delete(card.id)
   }

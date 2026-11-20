@@ -19,6 +19,6 @@
     z-index: 100;
     width: min(92vw, 420px);
   }
-  .toast { padding: 10px 16px; background: var(--butter-soft); font-size: 15px; text-align: center; }
-  .toast.error { background: var(--berry-soft); }
+  .toast { padding: 10px 16px; background: var(--card); font-size: 15px; text-align: center; }
+  .toast.error { background: var(--ink); color: var(--bg); }
 </style>

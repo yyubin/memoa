@@ -78,6 +78,12 @@ export interface CardRow {
 export interface DeckSettings {
   newPerDay: number
   kinds: CardKind[]
+  /** 새 카드 순서: 복습 사이에 섞기(Anki 기본) / 복습 다 끝난 뒤 / 복습보다 먼저 */
+  newMix: 'mix' | 'after' | 'before'
+  /** 몇 번 까먹으면(lapse) '어려운 카드'로 표시할지 (Anki 기본 8) */
+  leechThreshold: number
+  /** 어려운 카드가 됐을 때: 표시만 / 표시 + 숨기기 */
+  leechAction: 'tag' | 'suspend'
 }
 
 export interface Deck {
@@ -88,10 +94,31 @@ export interface Deck {
   created_at: string
 }
 
+/** profiles.settings (jsonb, 사용자가 직접 수정 가능) */
+export interface ProfileSettings {
+  /** 선택한 직업 (lib/jobs.ts 의 JobId) */
+  job?: string
+  /** 홈에서 'INCREASE LEVEL' 로 바로 공부할 메인 단어장 */
+  mainDeck?: string
+  /** 개인 최적화된 FSRS 매개변수 */
+  fsrs?: FsrsPersonal
+}
+
+export interface FsrsPersonal {
+  weights: number[]
+  version: 'FSRS-7'
+  optimizedAt: string
+  reviewCount: number
+  /** 기본값 / 최적화 값의 예측 오차 (낮을수록 좋음) */
+  logLossDefault: number
+  logLossOptimized: number
+}
+
 export interface Profile {
   id: string
   nickname: string
   is_admin: boolean
+  settings: ProfileSettings
 }
 
 export interface ReviewLogRow {

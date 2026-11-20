@@ -1,153 +1,281 @@
 <script lang="ts">
-  import { onMount } from 'svelte'
-  import { listDecks, deckCounts, createDeck, getProfile, todayLogs, type DeckCounts } from '../lib/api'
+  import { onMount, tick } from 'svelte'
+  import { listDecks, deckCounts, todayLogs, totalExp, updateSettings, type DeckCounts } from '../lib/api'
+  import { me, loadProfile } from '../lib/profile.svelte'
+  import { deckSettings } from '../lib/kinds'
   import { go } from '../lib/router.svelte'
   import { toast, errorText } from '../lib/toast.svelte'
-  import type { Deck, Profile } from '../lib/types'
-  import Mascot from '../components/Mascot.svelte'
+  import { getJob, type JobId } from '../lib/jobs'
+  import { levelFromExp, expForRating } from '../lib/levels'
+  import type { Deck } from '../lib/types'
+  import JobArt from '../components/JobArt.svelte'
+  import JobPicker from '../components/JobPicker.svelte'
+  import DeckSheet from '../components/DeckSheet.svelte'
+  import Icon from '../components/Icon.svelte'
 
   let decks = $state<Deck[]>([])
   let counts = $state<Record<string, DeckCounts>>({})
-  let profile = $state<Profile | null>(null)
-  let reviewedToday = $state(0)
-  let loading = $state(true)
-  let adding = $state(false)
-  let newName = $state('')
-  let newEmoji = $state('📚')
+  const profile = $derived(me.profile)
+  let exp = $state<number | null>(null)
+  let todayExp = $state(0)
 
-  const EMOJIS = ['📚', '🌱', '🔬', '🏛️', '🌍', '🎧', '💬', '⭐']
+  let jobOpen = $state(false)
+  let deckOpen = $state(false)
+  let deckAdding = $state(false)
 
-  const greetings = [
-    '오늘도 단어 모으러 왔구나!',
-    '생선 모으듯 단어도 모아보자 🐟',
-    '조금씩 꾸준히가 최고야!',
-    '토플 만점까지 같이 가자!',
-  ]
-  const greeting = greetings[Math.floor(Math.random() * greetings.length)]
+  const job = $derived(getJob(profile?.settings.job))
+  const mainDeck = $derived(decks.find((d) => d.id === profile?.settings.mainDeck) ?? decks[0])
+  const mainCounts = $derived(mainDeck ? counts[mainDeck.id] : undefined)
+  const info = $derived(levelFromExp(exp ?? 0))
+  const fmt = (n: number) => n.toLocaleString('en-US')
 
   async function load() {
+    // EXP 는 따로 — 실패해도 나머지 화면은 뜨도록
+    totalExp().then((v) => (exp = v)).catch((e) => toast(errorText(e), 'error'))
     try {
-      const [d, p, logs] = await Promise.all([listDecks(), getProfile(), todayLogs()])
+      const [d, p, logs] = await Promise.all([listDecks(), loadProfile(true), todayLogs()])
       decks = d
-      profile = p
-      reviewedToday = logs.length
+      todayExp = logs.reduce((s, l) => s + expForRating(l.rating), 0)
+      if (!getJob(p.settings.job)) jobOpen = true
       const entries = await Promise.all(d.map(async (deck) => [deck.id, await deckCounts(deck.id)] as const))
       counts = Object.fromEntries(entries)
     } catch (e) {
       toast(errorText(e), 'error')
-    } finally {
-      loading = false
     }
   }
 
-  async function addDeck(e: SubmitEvent) {
-    e.preventDefault()
-    if (!newName.trim()) return
+  async function pickJob(id: JobId) {
     try {
-      const deck = await createDeck(newName.trim(), newEmoji)
-      adding = false
-      newName = ''
-      go(`/deck/${deck.id}`)
-    } catch (err) {
-      toast(errorText(err), 'error')
+      const settings = await updateSettings({ job: id })
+      if (me.profile) me.profile.settings = settings
+    } catch (e) {
+      toast(errorText(e), 'error')
+      throw e
     }
+  }
+
+  async function setMain(id: string) {
+    const p = me.profile
+    if (!p) return
+    const prev = p.settings.mainDeck
+    p.settings.mainDeck = id
+    try {
+      await updateSettings({ mainDeck: id })
+    } catch (e) {
+      p.settings.mainDeck = prev
+      toast(errorText(e), 'error')
+    }
+  }
+
+  function openDecks(adding = false) {
+    deckAdding = adding
+    deckOpen = true
+  }
+
+  async function switchToJob() {
+    deckOpen = false
+    await tick()
+    jobOpen = true
+  }
+
+  /** 지금 공부할 게 가장 많은 단어장 (복습 + 오늘 들어올 새 카드). 동점이면 메인 단어장 */
+  function questDeck(): Deck | null {
+    let best: Deck | null = null
+    let bestScore = 0
+    const ordered = mainDeck ? [mainDeck, ...decks.filter((d) => d.id !== mainDeck.id)] : decks
+    for (const d of ordered) {
+      const c = counts[d.id]
+      if (!c) continue
+      const score = c.due + Math.min(c.newCards, deckSettings(d).newPerDay)
+      if (score > bestScore) {
+        best = d
+        bestScore = score
+      }
+    }
+    return best
+  }
+
+  function quest() {
+    if (!decks.length) return openDecks(true)
+    // 카운트를 아직 못 불러왔으면 메인 단어장으로
+    if (decks.some((d) => !counts[d.id])) return go(`/deck/${mainDeck!.id}/study`)
+    const d = questDeck()
+    if (d) go(`/deck/${d.id}/study`)
+    else toast('✦ 오늘 퀘스트 완료! 새 단어를 넣어볼까요?')
+  }
+
+  /** 단어장이 없으면 먼저 만들게 한다 */
+  function withDeck(path: (d: Deck) => string) {
+    if (mainDeck) go(path(mainDeck))
+    else openDecks(true)
   }
 
   onMount(load)
 </script>
 
-<header class="row top">
-  <div class="row greet">
-    <Mascot size={60} />
-    <div class="bubble box">
-      <b>{profile?.nickname ?? '모아친구'}</b>야, {greeting}
+<div class="home">
+  <header class="top">
+    <button class="sq" type="button" aria-label="단어장 메뉴" onclick={() => openDecks()}>
+      <Icon name="grid" size={26} />
+    </button>
+    <div class="title-wrap">
+      <div class="app">{mainDeck ? mainDeck.name : 'Memoa'}</div>
+      <div class="sub">{todayExp > 0 ? `오늘 +${fmt(todayExp)} exp ↑` : 'lvl up ↑'}</div>
     </div>
-  </div>
-  <span class="spacer"></span>
-  <a class="btn small" href="#/me" aria-label="내 정보">⚙️</a>
-</header>
+    <a class="avatar" href="#/me" aria-label="내 정보">
+      <Icon name="smile" size={30} />
+    </a>
+  </header>
 
-<section class="today box">
-  <div>
-    <div class="muted small">오늘 모은 카드</div>
-    <div class="big title">{reviewedToday}<span class="unit">장</span></div>
-  </div>
-  <div class="acorns" aria-hidden="true">{'🐟'.repeat(Math.min(10, Math.ceil(reviewedToday / 10)))}</div>
-</section>
+  <section class="stage">
+    <button class="hero" type="button" onclick={() => (jobOpen = true)} aria-label={job ? `${job.ko} — 직업 바꾸기` : '직업 고르기'}>
+      <JobArt job={job?.id} size="100%" sparkles />
+    </button>
+  </section>
 
-<div class="row head">
-  <h2>내 단어장</h2>
-  <span class="spacer"></span>
-  <button class="btn small" onclick={() => (adding = !adding)}>{adding ? '닫기' : '+ 새 단어장'}</button>
+  <section class="status">
+    <h1 class="job">{job ? job.name : profile ? 'Novice' : ' '}</h1>
+    <p class="lv">
+      lv. {exp === null ? '–' : info.level}
+      <span class="small">({exp === null ? '…' : fmt(info.exp)} exp)</span>
+    </p>
+
+    <div
+      class="bar"
+      role="progressbar"
+      aria-label="다음 레벨까지 경험치"
+      aria-valuemin={info.curLevelExp}
+      aria-valuemax={info.nextLevelExp}
+      aria-valuenow={info.exp}
+    >
+      <span class="fill" style:width={`${Math.round(info.progress * 1000) / 10}%`}></span>
+    </div>
+    <div class="ends">
+      <span>{fmt(info.curLevelExp)} exp</span>
+      <span>{info.maxed ? 'MAX' : `${fmt(info.nextLevelExp)} exp`}</span>
+    </div>
+  </section>
+
+  <button class="cta" type="button" onclick={() => withDeck((d) => `/deck/${d.id}/study`)}>
+    <svg class="spark" viewBox="-10 -10 20 20" aria-hidden="true"><path d="M0 -9 Q1.4 -1.4 9 0 Q1.4 1.4 0 9 Q-1.4 1.4 -9 0 Q-1.4 -1.4 0 -9Z" /></svg>
+    <span>Increase level</span>
+    <svg class="spark" viewBox="-10 -10 20 20" aria-hidden="true"><path d="M0 -9 Q1.4 -1.4 9 0 Q1.4 1.4 0 9 Q-1.4 1.4 -9 0 Q-1.4 -1.4 0 -9Z" /></svg>
+  </button>
+  <p class="hint">
+    {#if mainDeck}
+      {mainDeck.emoji} {mainDeck.name} 공부하기 · 복습 {mainCounts?.due ?? '–'} · 새 카드 {mainCounts?.newCards ?? '–'}
+    {:else if profile}
+      단어장을 만들면 모험이 시작돼요
+    {:else}
+      &nbsp;
+    {/if}
+  </p>
+
+  <nav class="actions" aria-label="바로가기">
+    <div class="act">
+      <button class="pill" type="button" aria-label="퀘스트 — 지금 공부할 카드가 가장 많은 단어장 공부하기" onclick={quest}>
+        <Icon name="sword" size={32} />
+      </button>
+      <span class="cap" aria-hidden="true">퀘스트</span>
+    </div>
+    <div class="act">
+      <button class="pill" type="button" aria-label="단어 추가" onclick={() => withDeck((d) => `/deck/${d.id}/add`)}>
+        <Icon name="potion" size={32} />
+      </button>
+      <span class="cap" aria-hidden="true">단어 추가</span>
+    </div>
+    <div class="act">
+      <button class="pill" type="button" aria-label="단어장 열기" onclick={() => withDeck((d) => `/deck/${d.id}`)}>
+        <Icon name="key" size={32} />
+      </button>
+      <span class="cap" aria-hidden="true">단어장</span>
+    </div>
+  </nav>
 </div>
 
-{#if adding}
-  <form class="box newdeck stack pop" onsubmit={addDeck}>
-    <div class="row emojis">
-      {#each EMOJIS as em}
-        <button type="button" class="em" class:on={newEmoji === em} onclick={() => (newEmoji = em)}>{em}</button>
-      {/each}
-    </div>
-    <div class="row">
-      <input class="input" placeholder="단어장 이름 (예: 토플 리딩)" maxlength="40" bind:value={newName} />
-      <button class="btn primary">만들기</button>
-    </div>
-  </form>
-{/if}
-
-{#if loading}
-  <p class="muted center">불러오는 중…</p>
-{:else}
-  <div class="decks">
-    {#each decks as deck (deck.id)}
-      {@const c = counts[deck.id]}
-      <div class="deck box">
-        <a class="info" href={`#/deck/${deck.id}`}>
-          <span class="emoji">{deck.emoji}</span>
-          <div>
-            <div class="title name">{deck.name}</div>
-            <div class="muted small">단어 {c?.total ?? 0}개</div>
-          </div>
-        </a>
-        <div class="row stats">
-          <span class="chip due">복습 {c?.due ?? 0}</span>
-          <span class="chip new">새 카드 {c?.newCards ?? 0}</span>
-          <span class="spacer"></span>
-          <a class="btn primary small" href={`#/deck/${deck.id}/study`}>공부하기</a>
-        </div>
-      </div>
-    {:else}
-      <div class="box empty">
-        <Mascot mood="sleep" size={64} wiggle={false} />
-        <p>아직 단어장이 없어요. 하나 만들어볼까요?</p>
-      </div>
-    {/each}
-  </div>
-{/if}
+<JobPicker bind:open={jobOpen} current={job?.id} required={!!profile && !job} onpick={pickJob} />
+<DeckSheet
+  bind:open={deckOpen}
+  bind:adding={deckAdding}
+  {decks}
+  {counts}
+  mainId={mainDeck?.id}
+  onmain={setMain}
+  onjob={switchToJob}
+/>
 
 <style>
-  .top { margin-bottom: 18px; align-items: flex-start; }
-  .greet { align-items: center; gap: 8px; }
-  .bubble { padding: 10px 14px; border-radius: 16px 16px 16px 4px; font-size: 15px; max-width: 420px; }
-  .today { display: flex; align-items: center; justify-content: space-between; padding: 16px 20px; background: var(--mint-soft); margin-bottom: 26px; }
-  .big { font-size: 40px; line-height: 1; }
-  .unit { font-size: 18px; margin-left: 4px; }
-  .small { font-size: 13px; }
-  .acorns { font-size: 20px; letter-spacing: 2px; text-align: right; max-width: 50%; }
-  .head { margin-bottom: 12px; }
-  .head h2 { font-size: 22px; }
-  .newdeck { padding: 14px; margin-bottom: 14px; }
-  .emojis { flex-wrap: wrap; gap: 6px; }
-  .em { font-size: 22px; border: 2px solid transparent; background: none; border-radius: 12px; padding: 4px 6px; cursor: pointer; }
-  .em.on { border-color: var(--line); background: var(--butter-soft); }
-  .decks { display: grid; gap: 14px; }
-  .deck { padding: 16px; display: grid; gap: 12px; }
-  .info { display: flex; align-items: center; gap: 12px; text-decoration: none; }
-  .emoji { font-size: 34px; width: 52px; height: 52px; display: grid; place-items: center; background: var(--peach-soft); border-radius: 16px; border: 2.5px solid var(--line); }
-  .name { font-size: 20px; }
-  .stats { flex-wrap: wrap; }
-  .chip.due { background: var(--sky-soft); }
-  .chip.new { background: var(--mint-soft); }
-  .empty { padding: 28px; text-align: center; display: grid; justify-items: center; }
-  .center { text-align: center; }
+  .home {
+    max-width: 430px;
+    margin: 0 auto;
+    min-height: calc(100dvh - 44px - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+    display: flex;
+    flex-direction: column;
+  }
+
+  /* 상단 바 */
+  .top { display: grid; grid-template-columns: 46px 1fr 46px; align-items: center; gap: 8px; }
+  .sq, .avatar {
+    width: 46px; height: 46px; display: grid; place-items: center; padding: 0;
+    border: 2.5px solid var(--line); cursor: pointer; color: var(--ink); text-decoration: none;
+  }
+  .sq { border-radius: 14px; background: var(--card); }
+  .avatar { border-radius: 50%; background: var(--ink); color: var(--bg); }
+  .sq:active, .avatar:active { transform: scale(.94); }
+  .title-wrap { text-align: center; min-width: 0; line-height: 1.25; }
+  .app {
+    font-family: var(--font-title); font-size: 14px; text-transform: uppercase; letter-spacing: .04em;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .sub { font-family: var(--font-mono); font-size: 12px; }
+
+  /* 캐릭터 */
+  .stage { flex: 1; display: grid; place-items: center; padding: 8px 0 4px; min-height: 0; }
+  .hero {
+    width: min(100%, 330px, 42dvh); padding: 0; border: none; background: none; cursor: pointer;
+    border-radius: 24px; -webkit-tap-highlight-color: transparent;
+  }
+  .hero:active { transform: scale(.98); }
+
+  /* 직업 / 레벨 */
+  .status { text-align: center; }
+  .job { font-family: var(--font-title); font-size: 32px; line-height: 1.1; letter-spacing: -.01em; }
+  .lv { margin: 4px 0 0; font-family: var(--font-mono); font-size: 16px; font-weight: 700; }
+  .lv .small { font-size: 12px; font-weight: 400; }
+  .bar {
+    margin-top: 18px; height: 20px; padding: 2px;
+    border: 2.5px solid var(--line); border-radius: 999px; background: var(--card); overflow: hidden;
+  }
+  .fill { display: block; height: 100%; min-width: 0; border-radius: 999px; background: var(--ink); transition: width .6s ease; }
+  .ends { display: flex; justify-content: space-between; margin-top: 6px; font-family: var(--font-mono); font-size: 12px; }
+
+  /* 큰 버튼 */
+  .cta {
+    margin-top: 18px; width: 100%; height: 62px; padding: 0 22px;
+    display: flex; align-items: center; justify-content: space-between; gap: 12px;
+    border: 2.5px solid var(--line); border-radius: 999px; background: var(--ink); color: var(--bg); cursor: pointer;
+    font-family: var(--font-title); font-size: 17px; text-transform: uppercase; letter-spacing: .06em;
+    transition: transform .08s ease;
+  }
+  .cta:active { transform: scale(.98); }
+  .spark { width: 18px; height: 18px; fill: currentColor; flex: none; }
+  .hint {
+    margin: 8px 0 0; text-align: center; font-size: 12px; color: var(--ink-soft);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+
+  /* 원형 버튼 3개 */
+  .actions { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-top: 14px; }
+  .act { display: grid; justify-items: center; gap: 4px; }
+  .pill {
+    width: 100%; height: 66px; display: grid; place-items: center; padding: 0;
+    border: 2.5px solid var(--line); border-radius: 999px; background: var(--card); color: var(--ink); cursor: pointer;
+    transition: transform .08s ease;
+  }
+  .pill:active { transform: scale(.95); }
+  .cap { font-size: 12px; font-weight: 700; }
+
+  @media (prefers-reduced-motion: reduce) {
+    .fill { transition: none; }
+  }
 </style>

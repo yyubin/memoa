@@ -6,7 +6,7 @@
   import { go } from '../lib/router.svelte'
   import type { Deck, SentenceData, VocabData } from '../lib/types'
   import TopBar from '../components/TopBar.svelte'
-  import Mascot from '../components/Mascot.svelte'
+  import MyChar from '../components/MyChar.svelte'
   import VocabEditor from '../components/VocabEditor.svelte'
   import SentenceEditor from '../components/SentenceEditor.svelte'
 
@@ -72,7 +72,7 @@
         drafts = drafts.filter((x) => x.key !== d.key)
         ok++
       }
-      toast(`${ok}개 저장했어요! 🐟`)
+      toast(`${ok}개 저장했어요! ✦`)
       drafts = []
     } catch (e) {
       toast(`${ok}개 저장 후 실패: ${errorText(e)}`, 'error')
@@ -97,7 +97,7 @@
           const res = await extractPhoto(img, photoHint.trim())
           usage = res.usage
           if (res.kind === 'other' || res.entries.length === 0) {
-            toast(`사진 ${i + 1}: 단어를 찾지 못했어요 😿`, 'error')
+            toast(`사진 ${i + 1}: 단어를 찾지 못했어요`, 'error')
             continue
           }
           for (const entry of res.entries) {
@@ -171,7 +171,7 @@
 {#if tab === 'ai'}
   <section class="box panel stack">
     <div class="row hint">
-      <Mascot size={44} mood={busy ? 'wow' : 'happy'} />
+      <span class="char"><MyChar size={56} sparkles={busy} /></span>
       <p>단어만 적어주면 뜻·동의어·반의어·예문은 내가 채워줄게! <span class="muted">(한 줄에 하나, 최대 {MAX}개)</span></p>
     </div>
     <textarea class="input" rows="5" placeholder={'mitigate\nsubstantial\nhypothesis'} bind:value={input} disabled={busy}></textarea>
@@ -179,7 +179,7 @@
       {#if usage}<span class="muted small">오늘 AI 사용 {usage.used}{usage.limit ? ` / ${usage.limit}` : ''}</span>{/if}
       <span class="spacer"></span>
       <button class="btn primary" onclick={generate} disabled={busy || !words.length}>
-        {busy ? '모아가 열심히 찾는 중… 🐾' : `${words.length || ''}개 채우기`}
+        {busy ? '열심히 찾는 중… ✦' : `${words.length || ''}개 채우기`}
       </button>
     </div>
   </section>
@@ -187,7 +187,7 @@
 {:else if tab === 'photo'}
   <section class="box panel stack">
     <div class="row hint">
-      <Mascot size={44} mood={busy ? 'wow' : 'happy'} />
+      <span class="char"><MyChar size={56} sparkles={busy} /></span>
       <p>단어장, 교재, 지문 사진을 찍어줘! 사진에 적힌 뜻·유의어·반의어는 그대로 쓰고, 빠진 건 내가 채울게. <span class="muted">(여러 장 가능)</span></p>
     </div>
     <input class="input" placeholder="메모 (선택) 예: 밑줄 친 단어만 / 3번 단원만" maxlength="200" bind:value={photoHint} disabled={busy} />
@@ -202,7 +202,7 @@
       </label>
     </div>
     {#if busy && photoStatus}
-      <div class="row status"><span class="wiggle">🐾</span> {photoStatus} <span class="muted small">(단어가 많으면 1분쯤 걸려요)</span></div>
+      <div class="row status"><span class="wiggle">✦</span> {photoStatus} <span class="muted small">(단어가 많으면 1분쯤 걸려요)</span></div>
     {/if}
     {#if photoPreview}<img class="preview" src={photoPreview} alt="올린 사진 미리보기" />{/if}
     {#if usage}<span class="muted small">오늘 AI 사용 {usage.used}{usage.limit ? ` / ${usage.limit}` : ''}</span>{/if}
@@ -212,7 +212,7 @@
 {#if tab === 'ai' || tab === 'photo'}
   {#if Object.keys(failed).length}
     <div class="box fail">
-      {#each Object.entries(failed) as [w, msg]}<div>😿 <b>{w}</b>: {msg}</div>{/each}
+      {#each Object.entries(failed) as [w, msg]}<div>✗ <b>{w}</b>: {msg}</div>{/each}
     </div>
   {/if}
 
@@ -272,12 +272,13 @@
 <style>
   .tabs { display: grid; grid-template-columns: repeat(4, 1fr); border: 2.5px solid var(--line); border-radius: 999px; overflow: hidden; margin-bottom: 16px; background: var(--card); }
   .tabs button { border: 0; background: transparent; padding: 9px 4px; font-family: var(--font-title); font-size: 16px; cursor: pointer; }
-  .tabs button.on { background: var(--butter); color: #3d3214; }
+  .tabs button.on { background: var(--ink); color: var(--bg); }
   .panel { padding: 16px; margin-bottom: 18px; }
   .hint { align-items: center; }
+  .char { flex: none; }
   .hint p { margin: 0; font-size: 15px; }
   .small { font-size: 13px; }
-  .fail { padding: 12px 16px; background: var(--berry-soft); margin-bottom: 16px; font-size: 14px; }
+  .fail { padding: 12px 16px; border-style: dashed; box-shadow: none; margin-bottom: 16px; font-size: 14px; }
   .head { margin: 8px 0 12px; flex-wrap: wrap; }
   .head h3 { font-size: 20px; }
   .drafts { display: grid; gap: 12px; }
@@ -286,7 +287,7 @@
   .summary { flex: 1; display: flex; gap: 8px; align-items: baseline; background: none; border: 0; padding: 0; text-align: left; cursor: pointer; }
   .w { font-size: 22px; }
   .ipa { font-size: 14px; }
-  .warn { background: var(--berry-soft); }
+  .warn { border-style: dashed; }
   .sline { padding-left: 4px; }
   .center { text-align: center; }
   .photo-btns { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
@@ -294,5 +295,5 @@
   .photo-btns .disabled { opacity: .5; pointer-events: none; }
   .status { font-size: 15px; }
   .preview { max-height: 220px; max-width: 100%; justify-self: center; border: 2.5px solid var(--line); border-radius: 14px; }
-  .photo { background: var(--sky-soft); }
+  .photo { background: var(--card); }
 </style>

@@ -1,11 +1,13 @@
 <script lang="ts">
   import { onMount } from 'svelte'
-  import { getProfile, updateNickname, createInvite, listInvites, aiUsageToday } from '../lib/api'
+  import { updateNickname, createInvite, listInvites, aiUsageToday } from '../lib/api'
   import { supabase } from '../lib/supabase'
   import { toast, errorText } from '../lib/toast.svelte'
   import type { Profile } from '../lib/types'
   import TopBar from '../components/TopBar.svelte'
-  import Mascot from '../components/Mascot.svelte'
+  import MyChar from '../components/MyChar.svelte'
+  import FsrsPanel from '../components/FsrsPanel.svelte'
+  import { loadProfile } from '../lib/profile.svelte'
 
   let profile = $state<Profile | null>(null)
   let nickname = $state('')
@@ -14,7 +16,7 @@
 
   onMount(async () => {
     try {
-      profile = await getProfile()
+      profile = await loadProfile(true)
       nickname = profile.nickname
       aiUsed = await aiUsageToday()
       if (profile.is_admin) invites = await listInvites()
@@ -54,7 +56,7 @@
 <TopBar back="/" title="내 정보" />
 
 <section class="box panel stack">
-  <div class="row"><Mascot size={52} /><div class="title name">{profile?.nickname ?? ''}</div></div>
+  <div class="row"><span class="char"><MyChar size={64} /></span><div class="title name">{profile?.nickname ?? ''}</div></div>
   <label class="field">닉네임
     <div class="row">
       <input class="input" maxlength="20" bind:value={nickname} />
@@ -86,11 +88,14 @@
   </section>
 {/if}
 
+<FsrsPanel />
+
 <button class="btn block" onclick={() => supabase.auth.signOut()}>로그아웃</button>
 
 <style>
   .panel { padding: 18px; margin-bottom: 16px; }
   .name { font-size: 24px; }
+  .char { flex: none; }
   .small { font-size: 13px; margin: 0; }
   h3 { font-size: 20px; }
   .invites { list-style: none; padding: 0; margin: 0; display: grid; gap: 8px; }

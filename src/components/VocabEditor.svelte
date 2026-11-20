@@ -75,7 +75,7 @@
   .word { flex: 2; min-width: 140px; font-size: 20px; }
   .ipa { flex: 1; min-width: 110px; }
   .sense { display: grid; gap: 8px; padding: 12px; border: 2px dashed var(--ink-soft); border-radius: 14px; }
-  .num { width: 28px; height: 28px; display: grid; place-items: center; background: var(--butter); border: 2px solid var(--line); border-radius: 50%; flex: none; }
+  .num { width: 28px; height: 28px; display: grid; place-items: center; background: var(--ink); color: var(--bg); border: 2px solid var(--line); border-radius: 50%; flex: none; }
   .pos { width: 84px; flex: none; padding-left: 8px; padding-right: 4px; }
   .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
   @media (max-width: 520px) { .grid2 { grid-template-columns: 1fr; } }
