@@ -19,7 +19,7 @@ const ALLOWED_ORIGINS = (Deno.env.get("ALLOWED_ORIGINS") ?? "http://localhost:51
 
 // ─────────────── 스키마 ───────────────
 const Example = z.object({
-  en: z.string().describe("Academic-register English sentence (TOEFL reading style), 12-25 words"),
+  en: z.string().describe("Academic-register English sentence (academic reading style), 12-25 words"),
   ko: z.string().describe("Natural Korean translation"),
   target: z.string().describe("The exact surface form of the headword as it appears in `en` (e.g. 'mitigated')"),
 });
@@ -28,7 +28,7 @@ const Sense = z.object({
   pos: z.enum(["n.", "v.", "adj.", "adv.", "prep.", "conj.", "phr."]),
   ko: z.string().describe("Concise Korean meaning(s), comma-separated, e.g. '완화하다, 경감시키다'"),
   en: z.string().describe("Short learner-dictionary English definition"),
-  synonyms: z.array(z.string()).describe("2-5 synonyms valid for THIS sense, TOEFL vocabulary-question style"),
+  synonyms: z.array(z.string()).describe("2-5 synonyms valid for THIS sense, in the style of 'closest in meaning to' vocabulary questions"),
   antonyms: z.array(z.string()).describe("0-3 antonyms for this sense; empty if none are natural"),
   distractors: z.array(z.string()).describe("3-4 same-part-of-speech words of similar difficulty that are NOT synonyms of this sense, plausible as wrong options in a 'closest in meaning' question"),
   examples: z.array(Example).describe("1-2 examples"),
@@ -38,7 +38,7 @@ const Entry = z.object({
   is_word: z.boolean().describe("false if the input is not a real English word or phrase"),
   word: z.string().describe("Headword in dictionary form, lowercase unless proper"),
   ipa: z.string().describe("IPA (American), e.g. /ˈmɪtɪɡeɪt/"),
-  senses: z.array(Sense).describe("1-3 senses, most TOEFL-relevant first"),
+  senses: z.array(Sense).describe("1-3 senses, most relevant to academic English first"),
   collocations: z.array(z.string()).describe("0-4 common collocations"),
 });
 type Entry = z.infer<typeof Entry>;
@@ -56,19 +56,19 @@ type PhotoEntry = z.infer<typeof PhotoEntry>;
 // ─────────────── 프롬프트 ───────────────
 const ENTRY_RULES = `- Prioritize senses that appear in academic reading/lectures (science, history, social science).
 - Korean meanings: short and natural, the way Korean vocabulary books phrase them.
-- Synonyms must be interchangeable with the headword in the given sense; prefer words that TOEFL uses as answer choices.
+- Synonyms must be interchangeable with the headword in the given sense; prefer words commonly used as answer choices in standardized vocabulary questions.
 - Distractors must be clearly wrong for that sense yet look plausible; never include a synonym.
 - Example sentences: academic register, each must contain the headword (any inflection) and \`target\` must match it exactly.`;
 
-const WORD_SYSTEM = `You build flashcard data for Korean students preparing for the TOEFL iBT.
+const WORD_SYSTEM = `You build flashcard data for Korean learners building advanced academic English vocabulary.
 For the given English word or phrase, produce a dictionary entry.
 ${ENTRY_RULES}
 If the input is a typo or not English, set is_word=false and fill other fields minimally.`;
 
-const PHOTO_SYSTEM = `You build flashcard data for Korean students preparing for the TOEFL iBT from a photo they took.
+const PHOTO_SYSTEM = `You build flashcard data for Korean learners building advanced academic English vocabulary, from a photo they took.
 1. Decide what the photo is:
    - word_list: a vocabulary book/list/notes. Extract EVERY headword shown.
-   - passage: a reading text. Extract words that are underlined, highlighted, circled or otherwise marked; if nothing is marked, pick the TOEFL-level academic words a learner is least likely to know.
+   - passage: a reading text. Extract words that are underlined, highlighted, circled or otherwise marked; if nothing is marked, pick the advanced academic words a learner is least likely to know.
    - other: nothing usable → return no entries.
 2. Information printed or handwritten in the photo has priority. If the photo gives a Korean meaning, synonyms (유의어/동의어/=/≒), antonyms (반의어/↔), or example sentences for a word, copy them faithfully (fix obvious OCR-level typos only) and list those fields in from_photo. Keep the photo's synonyms first; you may append a few more.
 3. Then complete every field the photo did not provide, following these rules:
