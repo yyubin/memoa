@@ -1,67 +1,76 @@
-# 메모아 🐱
+# Memoa
 
-토플 단어·문장을 간격 반복(FSRS)으로 외우는 웹 앱. 고양이 '모아'와 함께 단어를 모아모아.
+A spaced-repetition web app for English vocabulary and sentences, built for Korean learners. Pick a class (Paladin, Gunner, Spellblade, Witch) and level up your character as you review.
 
-- **Svelte 5 + Vite** 정적 SPA (서버 런타임 없음)
-- **Supabase**: 로그인, Postgres(RLS), Edge Function(AI)
-- **ts-fsrs** (FSRS-7) 복습 스케줄링
-- **Claude API**: 단어 → 뜻/동의어/반의어/예문 자동 생성, 사진에서 단어 추출
+- **Svelte 5 + Vite**: static SPA, no server runtime
+- **Supabase**: auth, Postgres with RLS, an Edge Function for AI
+- **ts-fsrs** (FSRS-7) scheduling, with in-browser per-user parameter optimization (fsrs-rs via WASM)
+- **Claude API**: fills in Korean/English meanings, synonyms, antonyms and examples from a word, and extracts words from photos
 
-## 문제 유형
+## Question types
 
-| 유형 | 방식 |
+| Type | Format |
 |---|---|
-| 🍙 뜻 맞히기 / 📖 영영 뜻 | 카드 뒤집기 |
-| ✍️ 단어 떠올리기 | 뜻 보고 입력 |
-| 🔁 동의어 (토플형) | 예문 속 단어 "closest in meaning to" 4지선다 |
-| 🙃 반의어 | 4지선다 (동의어가 함정 보기로 섞임) |
-| 🧩 예문 빈칸 | 활용형까지 입력 |
-| 🎧 듣고 쓰기 | 브라우저 TTS |
-| 💬 문장 해석 / 📝 문장 영작 | 카드 뒤집기 |
+| Meaning (Korean) / Meaning (English) | Flip card |
+| Recall | Type the word from its meaning |
+| Synonym | "closest in meaning to" multiple choice, with the word highlighted in an example |
+| Antonym | Multiple choice; synonyms appear as trap options |
+| Cloze | Type the inflected form into an example sentence |
+| Listening | Browser TTS, type the spelling |
+| Sentence → Korean / Korean → sentence | Flip card |
 
-- 같은 단어의 다른 유형은 같은 날 안 나옴
-- '뜻 맞히기'를 한 번 졸업해야 나머지 유형이 열림
-- 자동 채점은 *추천*만 하고 최종 평가는 직접 (Enter = 추천대로)
+## Review behavior (Anki-style)
 
-단축키: `Space` 정답 보기 · `1~4` 보기 선택/평가 · `Enter` 추천 평가 · `Ctrl+Z` 되돌리기
+- FSRS-7 with 90% target retention, learning steps 1m → 10m, relearning step 10m
+- Day rollover at 4 AM; learn-ahead limit 20 minutes
+- Sibling burying: other cards of the same word don't appear on the same day
+- New cards are mixed evenly between reviews by default (per deck: mix / after reviews / before reviews)
+- Leeches: a card is flagged after 8 lapses, then every 4 more (per deck threshold; tag only or tag + suspend)
+- Other question types unlock only after the word's "Meaning (Korean)" card graduates
+- Auto-grading only *suggests* a rating; you confirm it (Enter accepts the suggestion)
+- Per-user FSRS optimization (Profile → FSRS) runs fsrs-rs in the browser after 400+ reviews and is applied only if it lowers log loss
 
-## 개발
+Shortcuts: `Space` show answer · `1–4` pick option / rate · `Enter` accept suggested rating · `Ctrl+Z` undo
+
+## Development
 
 ```bash
 npm install
 cp .env.example .env.local   # Supabase URL / anon key
 npm run dev
-npm test        # 핵심 로직 테스트
-npm run check   # 타입 검사
+npm test        # unit tests (queue, grading, FSRS, optimizer, levels)
+npm run check   # type check
 ```
 
-## Supabase 세팅 (최초 1회)
+The optimizer needs the page to be cross-origin isolated. The dev server sends `Cross-Origin-Opener-Policy` / `Cross-Origin-Embedder-Policy` (see `vite.config.ts`), and `public/_headers` does the same on Cloudflare Pages. Any third-party resource you add must be CORS/CORP-enabled.
+
+## Supabase setup (once)
 
 ```bash
 supabase login
 supabase link --project-ref cslrrflgovmyvfartanc
-supabase db push                                   # 스키마/RLS 적용
-supabase secrets set ANTHROPIC_API_KEY=sk-ant-...  # 키는 여기에만!
-supabase secrets set ALLOWED_ORIGINS=http://localhost:5173,https://<배포주소>
+supabase db push                                   # schema + RLS
+supabase secrets set ANTHROPIC_API_KEY=sk-ant-...  # the key lives only here
+supabase secrets set ALLOWED_ORIGINS=http://localhost:5173,https://<your-domain>
 supabase functions deploy enrich
 ```
 
-선택 secrets:
-- `CLAUDE_MODEL` (기본 `claude-opus-5-5`, 저렴하게 쓰려면 `claude-haiku-5-5`)
-- `AI_DAILY_LIMIT` (기본 40) / `AI_ADMIN_DAILY_LIMIT` (기본 300): 하루 AI 처리 단어 수
+Optional secrets:
+- `CLAUDE_MODEL` (default `claude-opus-5-5`; `claude-haiku-5-5` is much cheaper)
+- `AI_DAILY_LIMIT` (default 40) / `AI_ADMIN_DAILY_LIMIT` (default 300): AI-generated words per user per day
 
-대시보드 설정:
-- Authentication → Sign In / Providers → Email: 메일 인증을 끄면 가입 후 바로 로그인 (기본 메일 발송은 시간당 횟수 제한이 있음)
-- Authentication → URL Configuration: Site URL을 배포 주소로
+Dashboard:
+- Authentication → Sign In / Providers → Email: turn off email confirmation so sign-up logs in immediately (the built-in mailer is rate-limited)
+- Authentication → URL Configuration: set Site URL to your deployed domain
 
-## 가입 / 초대
+## Sign-up and invites
 
-- **첫 가입자 = 관리자** (초대 코드 없이 가입)
-- 이후 가입은 관리자가 `내 정보 → 친구 초대`에서 만든 코드 필요 (14일, 1회용)
+- **The first account becomes the admin** (no invite code needed)
+- Everyone after that needs an invite code from Profile → Invite friends (valid 14 days, single use)
 
-## 보안 메모
+## Security notes
 
-- 모든 테이블 RLS: 본인 행만 접근. `is_admin`은 클라이언트에서 수정 불가
-- AI 키는 Edge Function secrets에만 존재. 함수는 JWT 확인 + 사용자별 하루 한도
-- AI 결과는 `word_cache`에 공용 캐시 (같은 단어는 재호출 없음, 사진 결과는 캐시 안 함)
-- 카드 내용은 전부 텍스트로 렌더링 (`{@html}` 미사용) + CSP
+- RLS on every table: users can only access their own rows; `is_admin` can't be changed from the client
+- The AI key exists only in Edge Function secrets; the function verifies the JWT and enforces a per-user daily limit
+- AI results for typed words go into a shared `word_cache` (no repeat calls for the same word); photo results are not cached
+- Card content is always rendered as text (no `{@html}`), plus a CSP
