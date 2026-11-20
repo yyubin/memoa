@@ -75,7 +75,12 @@ const PHOTO_SYSTEM = `You build flashcard data for Korean learners building adva
 ${ENTRY_RULES}
 At most ${MAX_WORDS_PER_PHOTO} entries, in the order they appear. Set is_word=true for real words.`;
 
-const anthropic = new Anthropic(); // ANTHROPIC_API_KEY (Edge Function secret)
+// ANTHROPIC_API_KEY (Edge Function secret).
+// 워크스페이스에 묶이지 않은 키라면 ANTHROPIC_WORKSPACE_ID 로 사용할 워크스페이스를 지정한다.
+const WORKSPACE_ID = Deno.env.get("ANTHROPIC_WORKSPACE_ID")?.trim();
+const anthropic = new Anthropic(
+  WORKSPACE_ID ? { defaultHeaders: { "anthropic-workspace-id": WORKSPACE_ID } } : {},
+);
 
 function fallbackOpts() {
   // 서버측 거절 대비 폴백 (Haiku 는 미지원)
@@ -120,6 +125,19 @@ async function extractPhoto(base64: string, mediaType: ImageType, hint: string) 
   if (res.stop_reason === "refusal") throw new Error("AI가 이 사진 처리를 거절했어요");
   if (!res.parsed_output) throw new Error("사진에서 단어를 읽지 못했어요");
   return res.parsed_output;
+}
+
+/** 사용자에게 보여줄 오류 설명 (원인 파악용; 키 같은 비밀값은 들어가지 않음) */
+function describeError(err: unknown, fallback: string): string {
+  if (err instanceof Anthropic.RateLimitError) return "AI가 바빠요. 잠시 후 다시 시도해 주세요";
+  if (err instanceof Anthropic.AuthenticationError) return `${fallback} (AI 키 인증 실패: ANTHROPIC_API_KEY 를 확인해 주세요)`;
+  if (err instanceof Anthropic.NotFoundError) return `${fallback} (모델을 찾을 수 없어요: CLAUDE_MODEL=${MODEL})`;
+  if (err instanceof Anthropic.APIError) {
+    const type = (err.error as { error?: { type?: string } } | undefined)?.error?.type ?? "";
+    return `${fallback} (AI ${err.status ?? "?"} ${type}: ${err.message})`.slice(0, 300);
+  }
+  if (err instanceof Error) return /[가-힣]/.test(err.message) ? err.message : `${fallback} (${err.message})`.slice(0, 300);
+  return fallback;
 }
 
 // ─────────────── HTTP ───────────────
@@ -204,10 +222,7 @@ Deno.serve(async (req) => {
       });
     } catch (err) {
       console.error("photo failed", err);
-      const msg = err instanceof Anthropic.RateLimitError
-        ? "AI가 바빠요. 잠시 후 다시 시도해 주세요"
-        : err instanceof Error && /[가-힣]/.test(err.message) ? err.message : "사진 처리에 실패했어요";
-      return json(req, { error: msg }, 502);
+      return json(req, { error: describeError(err, "사진 처리에 실패했어요") }, 502);
     }
   }
 
@@ -242,9 +257,7 @@ Deno.serve(async (req) => {
         if (r.value.is_word) toCache.push({ word: w, data: r.value, model: MODEL });
       } else {
         console.error("generate failed", w, r.reason);
-        errors[w] = r.reason instanceof Anthropic.RateLimitError
-          ? "AI가 바빠요. 잠시 후 다시 시도해 주세요"
-          : "생성에 실패했어요";
+        errors[w] = describeError(r.reason, "생성에 실패했어요");
       }
     });
     if (toCache.length) await admin.from("word_cache").upsert(toCache);

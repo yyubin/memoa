@@ -58,6 +58,7 @@ supabase functions deploy enrich
 Optional secrets:
 - `CLAUDE_MODEL` (default `claude-opus-5-5`; `claude-haiku-5-5` is much cheaper)
 - `AI_DAILY_LIMIT` (default 40) / `AI_ADMIN_DAILY_LIMIT` (default 300): AI-generated words per user per day
+- `ANTHROPIC_WORKSPACE_ID`: required only if your API key isn't scoped to a workspace (sent as the `anthropic-workspace-id` header). A workspace-scoped key doesn't need it.
 
 Dashboard:
 - Authentication → Sign In / Providers → Email: turn off email confirmation so sign-up logs in immediately (the built-in mailer is rate-limited)
