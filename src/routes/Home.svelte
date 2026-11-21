@@ -12,6 +12,7 @@
   import JobPicker from '../components/JobPicker.svelte'
   import DeckSheet from '../components/DeckSheet.svelte'
   import Icon from '../components/Icon.svelte'
+  import { lastSeenLevel, markLevelSeen } from '../lib/levelSeen'
 
   let decks = $state<Deck[]>([])
   let counts = $state<Record<string, DeckCounts>>({})
@@ -28,6 +29,23 @@
   const mainCounts = $derived(mainDeck ? counts[mainDeck.id] : undefined)
   const info = $derived(levelFromExp(exp ?? 0))
   const fmt = (n: number) => n.toLocaleString('en-US')
+
+  let art = $state<ReturnType<typeof JobArt> | null>(null)
+
+  // 지난번보다 레벨이 올랐으면 메인 화면에 돌아왔을 때 레벨업 연출 (기기별로 한 번)
+  $effect(() => {
+    const id = profile?.id
+    if (exp === null || !id || !job) return
+    const level = info.level
+    const seen = lastSeenLevel(id)
+    markLevelSeen(id, level)
+    if (seen !== null && level > seen) {
+      setTimeout(() => {
+        art?.play('lvup')
+        toast(`✦ LEVEL UP! lv. ${level}`)
+      }, 450)
+    }
+  })
 
   async function load() {
     // EXP 는 따로 — 실패해도 나머지 화면은 뜨도록
@@ -128,13 +146,21 @@
   </header>
 
   <section class="stage">
-    <button class="hero" type="button" onclick={() => (jobOpen = true)} aria-label={job ? `${job.ko} — 직업 바꾸기` : '직업 고르기'}>
-      <JobArt job={job?.id} size="100%" sparkles />
+    <button
+      class="hero"
+      type="button"
+      onclick={() => (job ? art?.play('act') : (jobOpen = true))}
+      aria-label={job ? `${job.ko} 동작 보기` : '직업 고르기'}
+    >
+      <JobArt bind:this={art} job={job?.id} size="100%" sparkles animated={!!job} />
     </button>
   </section>
 
   <section class="status">
-    <h1 class="job">{job ? job.name : profile ? 'Novice' : ' '}</h1>
+    <h1 class="job">
+      {job ? job.name : profile ? 'Novice' : ' '}
+      {#if job}<button class="swap" type="button" onclick={() => (jobOpen = true)} aria-label="직업 바꾸기" title="직업 바꾸기">↻</button>{/if}
+    </h1>
     <p class="lv">
       lv. {exp === null ? '–' : info.level}
       <span class="small">({exp === null ? '…' : fmt(info.exp)} exp)</span>
@@ -278,4 +304,10 @@
   @media (prefers-reduced-motion: reduce) {
     .fill { transition: none; }
   }
+  .swap {
+    vertical-align: middle; margin-left: 4px; width: 30px; height: 30px; padding: 0;
+    border: 2px solid var(--line); border-radius: 50%; background: var(--card); color: var(--ink);
+    font-size: 16px; line-height: 1; cursor: pointer;
+  }
+  .swap:active { transform: scale(.92); }
 </style>

@@ -3,6 +3,7 @@
    * 직업 캐릭터 라인아트 (흑백, 굵은 외곽선).
    * 색은 --ink / --card 토큰을 써서 다크 모드에서 자동으로 반전된다.
    */
+  import { tick } from 'svelte'
   import type { JobId } from '../lib/jobs'
 
   let {
@@ -10,7 +11,44 @@
     size = 280,
     sparkles = false,
     label = '',
-  }: { job?: JobId | string; size?: number | string; sparkles?: boolean; label?: string } = $props()
+    animated = false,
+  }: {
+    job?: JobId | string
+    size?: number | string
+    sparkles?: boolean
+    label?: string
+    /** 대기 모션(숨쉬기·깜빡임) + play() 로 동작/레벨업 연출 */
+    animated?: boolean
+  } = $props()
+
+  export type Motion = 'act' | 'lvup'
+  const DURATION: Record<string, number> = { paladin: 1300, gunner: 1400, spellblade: 1600, witch: 1600, lvup: 1900 }
+
+  let motion = $state<Motion | null>(null)
+  let timer: ReturnType<typeof setTimeout> | undefined
+  let svgEl = $state<SVGSVGElement | null>(null)
+
+  /** 직업별 동작('act') 또는 레벨업('lvup') 연출을 한 번 재생 */
+  export async function play(kind: Motion) {
+    if (!animated) return
+    clearTimeout(timer)
+    if (motion) {
+      // 재생 중이면 클래스를 뗐다가 스타일을 다시 계산시켜야 처음부터 다시 재생됨
+      motion = null
+      await tick()
+      svgEl?.getBoundingClientRect()
+    }
+    motion = kind
+    timer = setTimeout(() => (motion = null), kind === 'lvup' ? DURATION.lvup : (DURATION[job ?? ''] ?? 1400))
+  }
+
+  $effect(() => () => clearTimeout(timer))
+
+  /** 레벨업 빛줄기 */
+  const RAYS = Array.from({ length: 12 }, (_, i) => {
+    const a = (i * Math.PI) / 6
+    return `M120 150 L${(120 + 150 * Math.cos(a)).toFixed(1)} ${(150 + 150 * Math.sin(a)).toFixed(1)}`
+  }).join(' ')
 
   /** 마법진 둘레의 룬 글자 (작은 획 조합) */
   function runeRing(cx: number, cy: number, r: number, n: number) {
@@ -44,7 +82,11 @@
   좌표는 viewBox "-20 0 280 270" 의 사용자 좌표 그대로 (translate 없음 → transform-origin px 가 곧 좌표).
 -->
 <svg
+  bind:this={svgEl}
   class="art job-{job || 'none'}"
+  class:idle={animated}
+  class:act={motion === 'act'}
+  class:lvup={motion === 'lvup'}
   width={size}
   viewBox="-20 0 280 270"
   role={label ? 'img' : undefined}
@@ -57,6 +99,14 @@
       <path class="ink sparkle s2" d={star(32, 96, 7)} />
       <path class="ink sparkle s3" d={star(234, 206, 16)} />
       <path class="ink sparkle s4" d={star(214, 236, 7)} />
+    </g>
+  {/if}
+
+  {#if animated}
+    <g class="ov-behind">
+      <path class="rays" d={RAYS} />
+      <circle class="ring" cx="120" cy="150" r="70" />
+      <circle class="aura" cx="120" cy="140" r="96" />
     </g>
   {/if}
 
@@ -308,6 +358,26 @@
     <circle class="ln dash" cx="120" cy="140" r="78" stroke-width="4" />
     <text class="q" x="120" y="172" text-anchor="middle">?</text>
   {/if}
+  {#if animated}
+    {#if job === 'paladin'}
+      <path class="swoosh" d="M196 70 Q246 150 178 236" />
+    {:else if job === 'gunner'}
+      <g class="shells">
+        <rect x="96" y="150" width="5" height="10" rx="1" />
+        <rect x="96" y="150" width="5" height="10" rx="1" />
+      </g>
+    {:else if job === 'witch'}
+      <g class="puffs">
+        <circle cx="84" cy="96" r="7" />
+        <circle cx="98" cy="84" r="5" />
+        <circle cx="76" cy="78" r="4" />
+      </g>
+    {/if}
+    <g class="stamp">
+      <rect class="ink" x="44" y="6" width="152" height="40" rx="10" />
+      <text class="stamp-text" x="120" y="34" text-anchor="middle">LEVEL UP!</text>
+    </g>
+  {/if}
 </svg>
 
 <style>
@@ -344,4 +414,126 @@
   @media (prefers-reduced-motion: reduce) {
     .sparkle, .magic { animation: none; }
   }
+
+/* ───────── 모션 (animated) ───────── */
+/* overlays */
+.ov-behind * { fill:none; stroke:var(--ink) }
+.rays { stroke-width:3; stroke-dasharray:14 22; opacity:0; transform-origin:120px 150px }
+.ring, .aura { opacity:0; transform-box:fill-box; transform-origin:center; stroke-width:3 }
+.aura { stroke-dasharray:6 10 }
+.swoosh { fill:none; stroke:var(--ink); stroke-width:7; stroke-linecap:round; stroke-dasharray:190; stroke-dashoffset:190; opacity:0 }
+.shells rect { fill:var(--card); stroke-width:2.5; opacity:0; transform-box:fill-box; transform-origin:center }
+.puffs circle { fill:var(--card); stroke-width:3; opacity:0; transform-box:fill-box; transform-origin:center }
+.stamp { opacity:0; transform-box:fill-box; transform-origin:center; pointer-events:none }
+.stamp-text { font-family:var(--font-title); font-size:22px; fill:var(--card); stroke:none; letter-spacing:.04em }
+
+/* ───────── idle ───────── */
+.art.idle .body { animation:breathe 3.2s ease-in-out infinite }
+.art.idle .head { animation:bob 3.2s ease-in-out infinite }
+.art.idle .arm-weapon { animation:swayW 3.2s ease-in-out infinite }
+.art.idle .arm-off { animation:swayO 3.2s ease-in-out infinite }
+.art.idle .eyes { animation:blink 4.6s infinite }
+.art.idle .shadow { transform-box:fill-box; transform-origin:center; animation:shadow 3.2s ease-in-out infinite }
+.art.idle.job-witch:not(.act):not(.lvup) .head { animation:bobWitch 3.2s ease-in-out infinite }
+@keyframes breathe { 0%,100% { transform:scale(1,1) } 50% { transform:scale(1.012,1.03) } }
+@keyframes bob { 0%,100% { transform:translateY(0) } 50% { transform:translateY(-3px) } }
+@keyframes bobWitch { 0%,100% { transform:translateY(0) rotate(0) } 50% { transform:translateY(-3px) rotate(-3deg) } }
+@keyframes swayW { 0%,100% { transform:translateY(0) rotate(0) } 50% { transform:translateY(-3px) rotate(-3deg) } }
+@keyframes swayO { 0%,100% { transform:translateY(0) rotate(0) } 50% { transform:translateY(-3px) rotate(2deg) } }
+@keyframes blink { 0%,90%,96%,100% { transform:scaleY(1) } 93% { transform:scaleY(.1) } }
+@keyframes shadow { 0%,100% { transform:scaleX(1) } 50% { transform:scaleX(.94) } }
+
+/* ───────── actions (.act) ───────── */
+/* paladin: wind-up, slash, shield shine */
+.art.act.job-paladin .arm-weapon { animation:palSlash 1.3s cubic-bezier(.5,0,.3,1) both }
+.art.act.job-paladin .body { animation:palLean 1.3s ease both }
+.art.act.job-paladin .head { animation:palHead 1.3s ease both }
+.art.act.job-paladin .swoosh { animation:swoosh 1.3s ease-out both }
+.art.act.job-paladin .fx { animation:fxFlash 1.3s ease both }
+@keyframes palSlash { 0% { transform:rotate(0) } 28% { transform:translateY(-4px) rotate(-62deg) } 40% { transform:rotate(78deg) } 52% { transform:rotate(66deg) } 100% { transform:rotate(0) } }
+@keyframes palLean { 0%,100% { transform:rotate(0) } 28% { transform:rotate(-3deg) scale(1,1.03) } 40% { transform:rotate(4deg) scale(1.02,.97) } }
+@keyframes palHead { 0%,100% { transform:translate(0,0) } 28% { transform:translate(-4px,-4px) } 40% { transform:translate(6px,3px) } }
+@keyframes swoosh { 0%,30% { stroke-dashoffset:190; opacity:0 } 36% { opacity:1 } 46% { stroke-dashoffset:0; opacity:1 } 70%,100% { stroke-dashoffset:-190; opacity:0 } }
+@keyframes fxFlash { 0%,55% { opacity:0 } 65%,85% { opacity:1 } 100% { opacity:0 } }
+
+/* gunner: two shots with recoil, flash, smoke, shells */
+.art.act.job-gunner .arm-weapon { animation:gunRecoil 1.4s ease both }
+.art.act.job-gunner .arm-off { animation:gunRecoilOff 1.4s ease both }
+.art.act.job-gunner .body { animation:gunBody 1.4s ease both }
+.art.act.job-gunner .fx { opacity:1 }
+.art.act.job-gunner .fx > :nth-child(1) { transform-box:fill-box; transform-origin:left center; animation:muzzle 1.4s steps(1,end) both }
+.art.act.job-gunner .fx > :nth-child(n+2) { transform-box:fill-box; transform-origin:center; animation:smoke 1.4s ease-out both }
+.art.act.job-gunner .fx > :nth-child(3) { animation-delay:.06s }
+.art.act.job-gunner .fx > :nth-child(4) { animation-delay:.12s }
+.art.act.job-gunner .shells rect:nth-child(1) { animation:shell 1.4s ease-out both }
+.art.act.job-gunner .shells rect:nth-child(2) { animation:shell2 1.4s ease-out both }
+@keyframes gunRecoil { 0%,100% { transform:translate(0,0) rotate(0) } 6% { transform:translate(-9px,3px) rotate(-7deg) } 18% { transform:translate(0,0) rotate(0) } 50% { transform:translate(0,0) } 56% { transform:translate(-9px,3px) rotate(-7deg) } 68% { transform:translate(0,0) rotate(0) } }
+@keyframes gunRecoilOff { 0%,100% { transform:translate(0,0) } 6% { transform:translate(-8px,1px) } 18% { transform:translate(0,0) } 56% { transform:translate(-8px,1px) } 68% { transform:translate(0,0) } }
+@keyframes gunBody { 0%,100% { transform:rotate(0) } 6%,56% { transform:rotate(-2deg) } 18%,68% { transform:rotate(0) } }
+@keyframes muzzle { 0% { opacity:0 } 3% { opacity:1; transform:scale(1.15) } 12% { opacity:0 } 53% { opacity:1; transform:scale(.95) } 62%,100% { opacity:0 } }
+@keyframes smoke { 0%,6% { opacity:0; transform:translate(0,0) scale(.6) } 14% { opacity:1 } 45% { opacity:0; transform:translate(10px,-18px) scale(1.4) } 55% { opacity:0; transform:translate(0,0) scale(.6) } 62% { opacity:1 } 95%,100% { opacity:0; transform:translate(12px,-20px) scale(1.5) } }
+@keyframes shell { 0%,5% { opacity:0; transform:translate(0,0) rotate(0) } 8% { opacity:1 } 30% { opacity:1; transform:translate(-26px,-30px) rotate(-200deg) } 46% { opacity:0; transform:translate(-40px,60px) rotate(-420deg) } 100% { opacity:0 } }
+@keyframes shell2 { 0%,55% { opacity:0; transform:translate(0,0) rotate(0) } 58% { opacity:1 } 78% { opacity:1; transform:translate(-30px,-26px) rotate(-220deg) } 96%,100% { opacity:0; transform:translate(-44px,62px) rotate(-440deg) } }
+
+/* spellblade: raise blade, rune flicker, sparks, spinning aura */
+.art.act.job-spellblade .arm-weapon { animation:sbRaise 1.6s cubic-bezier(.4,0,.2,1) both }
+.art.act.job-spellblade .arm-off { animation:sbOff 1.6s ease both }
+.art.act.job-spellblade .body { animation:sbBody 1.6s ease both }
+.art.act.job-spellblade .arm-weapon > g > .fx { animation:runes 1.6s linear both }
+.art.act.job-spellblade .arm-weapon > .fx { opacity:1 }
+.art.act.job-spellblade .arm-weapon > .fx > * { transform-box:fill-box; transform-origin:center; animation:spark 1.6s ease both }
+.art.act.job-spellblade .arm-weapon > .fx > :nth-child(2) { animation-delay:.12s }
+.art.act.job-spellblade .arm-weapon > .fx > :nth-child(3) { animation-delay:.24s }
+.art.act.job-spellblade .aura { animation:aura 1.6s ease both }
+@keyframes sbRaise { 0%,100% { transform:rotate(0) } 25% { transform:translateY(-6px) rotate(-24deg) } 80% { transform:translateY(-6px) rotate(-24deg) } }
+@keyframes sbOff { 0%,100% { transform:rotate(0) } 25%,80% { transform:rotate(-14deg) } }
+@keyframes sbBody { 0%,100% { transform:scale(1) } 25%,80% { transform:scale(1.01,1.04) } 50% { transform:scale(1.02,1.05) } }
+@keyframes runes { 0%,22% { opacity:0 } 28% { opacity:1 } 34% { opacity:.2 } 40%,48% { opacity:1 } 52% { opacity:.4 } 58%,82% { opacity:1 } 100% { opacity:0 } }
+@keyframes spark { 0%,20% { opacity:0; transform:scale(0) rotate(0) } 35% { opacity:1; transform:scale(1.5) rotate(45deg) } 60% { opacity:1; transform:scale(1) rotate(90deg) } 85%,100% { opacity:0; transform:scale(.2) rotate(180deg) } }
+@keyframes aura { 0%,15% { opacity:0; transform:scale(.6) rotate(0) } 35% { opacity:1; transform:scale(1) rotate(60deg) } 80% { opacity:1; transform:scale(1) rotate(200deg) } 100% { opacity:0; transform:scale(1.15) rotate(260deg) } }
+
+/* witch: shake potion, bubbles, puffs */
+.art.act.job-witch .arm-off { animation:wShake 1.6s ease both }
+.art.act.job-witch .head { animation:wHead 1.6s ease both }
+.art.act.job-witch .arm-weapon { animation:wBroom 1.6s ease both }
+.art.act.job-witch .fx { opacity:1 }
+.art.act.job-witch .fx > * { transform-box:fill-box; transform-origin:center; animation:bubble 1.6s ease-out both }
+.art.act.job-witch .fx > :nth-child(2) { animation-delay:.15s }
+.art.act.job-witch .fx > :nth-child(3) { animation-delay:.3s }
+.art.act.job-witch .fx > :nth-child(4) { animation:starPop 1.6s ease both }
+.art.act.job-witch .puffs circle { animation:puff 1.6s ease-out both }
+.art.act.job-witch .puffs circle:nth-child(2) { animation-delay:.1s }
+.art.act.job-witch .puffs circle:nth-child(3) { animation-delay:.2s }
+@keyframes wShake { 0%,100% { transform:rotate(0) } 8% { transform:rotate(-14deg) } 16% { transform:rotate(12deg) } 24% { transform:rotate(-12deg) } 32% { transform:rotate(10deg) } 40% { transform:rotate(0) } 55%,75% { transform:translateY(-6px) rotate(-22deg) } }
+@keyframes wHead { 0%,100% { transform:rotate(0) } 10%,40% { transform:rotate(3deg) } 55%,75% { transform:rotate(-5deg) translateY(-2px) } }
+@keyframes wBroom { 0%,100% { transform:rotate(0) } 20%,40% { transform:rotate(4deg) } }
+@keyframes bubble { 0%,40% { opacity:0; transform:translateY(8px) scale(.4) } 50% { opacity:1; transform:translateY(0) scale(1) } 90% { opacity:0; transform:translateY(-34px) scale(1.3) } 100% { opacity:0 } }
+@keyframes starPop { 0%,55% { opacity:0; transform:scale(0) rotate(0) } 68% { opacity:1; transform:scale(1.8) rotate(45deg) } 90%,100% { opacity:0; transform:scale(.4) rotate(120deg) } }
+@keyframes puff { 0%,50% { opacity:0; transform:scale(.3) } 62% { opacity:1; transform:scale(1) } 100% { opacity:0; transform:translateY(-26px) scale(1.6) } }
+
+/* ───────── level up (.lvup) ───────── */
+.art.lvup .body { animation:jumpBody 1.9s cubic-bezier(.3,0,.3,1) both }
+.art.lvup .head, .art.lvup .arm-off { animation:jumpPart 1.9s cubic-bezier(.3,0,.3,1) both }
+.art.lvup .arm-weapon { animation:jumpArm 1.9s cubic-bezier(.3,0,.3,1) both }
+.art.lvup .eyes { animation:none }
+.art.lvup .shadow { transform-box:fill-box; transform-origin:center; animation:jumpShadow 1.9s cubic-bezier(.3,0,.3,1) both }
+.art.lvup .rays { animation:rays 1.9s ease both, raysSpin 1.9s linear both }
+.art.lvup .ring { animation:ring 1.9s ease-out both }
+.art.lvup .sparkle { animation:sparkBurst 1.9s ease both }
+.art.lvup .stamp { animation:stamp 1.9s cubic-bezier(.2,1.6,.4,1) both }
+@keyframes jumpBody { 0%,100% { transform:translateY(0) scale(1,1) } 14% { transform:translateY(0) scale(1.07,.88) } 36% { transform:translateY(-38px) scale(.95,1.07) } 50% { transform:translateY(-40px) scale(1,1) } 64% { transform:translateY(0) scale(1.07,.9) } 76% { transform:translateY(0) scale(.98,1.03) } 86% { transform:scale(1,1) } }
+@keyframes jumpPart { 0%,100% { transform:translateY(0) } 14% { transform:translateY(11px) } 36% { transform:translateY(-45px) } 50% { transform:translateY(-40px) } 64% { transform:translateY(9px) } 76% { transform:translateY(-3px) } 86% { transform:translateY(0) } }
+@keyframes jumpArm { 0%,100% { transform:translateY(0) rotate(0) } 14% { transform:translateY(11px) rotate(8deg) } 36% { transform:translateY(-45px) rotate(-28deg) } 50% { transform:translateY(-40px) rotate(-32deg) } 64% { transform:translateY(9px) rotate(-10deg) } 86% { transform:translateY(0) rotate(0) } }
+@keyframes jumpShadow { 0%,100% { transform:scaleX(1); opacity:1 } 14% { transform:scaleX(1.12) } 36%,50% { transform:scaleX(.55); opacity:.5 } 64% { transform:scaleX(1.15); opacity:1 } 86% { transform:scaleX(1) } }
+@keyframes raysSpin { from { transform:rotate(0) } to { transform:rotate(40deg) } }
+@keyframes rays { 0%,30% { opacity:0; stroke-dashoffset:40 } 42% { opacity:1 } 85% { opacity:.8; stroke-dashoffset:-30 } 100% { opacity:0; stroke-dashoffset:-60 } }
+@keyframes ring { 0%,34% { opacity:0; transform:scale(.3) } 40% { opacity:1 } 80%,100% { opacity:0; transform:scale(1.9) } }
+@keyframes sparkBurst { 0%,30% { transform:scale(1) rotate(0) } 45% { transform:scale(1.9) rotate(45deg) } 70% { transform:scale(1.2) rotate(90deg) } 100% { transform:scale(1) rotate(90deg) } }
+@keyframes stamp { 0%,34% { opacity:0; transform:scale(2.4) rotate(-14deg) } 44% { opacity:1; transform:scale(1) rotate(-6deg) } 84% { opacity:1; transform:scale(1) rotate(-6deg) } 100% { opacity:0; transform:scale(.9) rotate(-6deg) } }
+
+@media (prefers-reduced-motion: reduce) {
+  .art.idle .body, .art.idle .head, .art.idle .arm-weapon, .art.idle .arm-off, .art.idle .eyes, .art.idle .shadow { animation:none }
+  .art.lvup .body, .art.lvup .head, .art.lvup .arm-weapon, .art.lvup .arm-off, .art.lvup .shadow { animation:none }
+}
+
 </style>

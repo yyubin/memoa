@@ -1,6 +1,9 @@
 <script lang="ts">
   import { onMount, onDestroy, tick } from 'svelte'
-  import { getDeck, listNotes, listCards, todayLogs, writeReview, undoReview, setSuspended, markLeech, dayEnd, type ReviewWrite } from '../lib/api'
+  import { getDeck, listNotes, listCards, todayLogs, totalExp, writeReview, undoReview, setSuspended, markLeech, dayEnd, type ReviewWrite } from '../lib/api'
+  import { levelFromExp, expForRating } from '../lib/levels'
+  import { markLevelSeen } from '../lib/levelSeen'
+  import LevelUpOverlay from '../components/LevelUpOverlay.svelte'
   import { loadProfile } from '../lib/profile.svelte'
   import { deckSettings, KINDS, becameLeech, lapsesOf, LEECH_TAG } from '../lib/kinds'
   import { StudyQueue } from '../lib/session'
@@ -33,6 +36,10 @@
   let startedAt = 0
   let undoStack: { w: ReviewWrite; touched: boolean; leechSuspended: boolean }[] = []
   let settings: DeckSettings | null = null
+  /** 전체 EXP (null = 아직 모름 → 레벨업 연출 생략) */
+  let exp: number | null = null
+  let userId = ''
+  let levelUp = $state<number | null>(null)
   let typeInput = $state<HTMLInputElement | null>(null)
   let timer: ReturnType<typeof setInterval> | undefined
 
@@ -49,6 +56,9 @@
       const [d, notes, cards, logs, profile] = await Promise.all([getDeck(deckId), listNotes(deckId), listCards(deckId), todayLogs(), loadProfile()])
       // 개인 최적화된 FSRS 매개변수가 있으면 사용
       setUserWeights(profile.settings.fsrs?.weights)
+      userId = profile.id
+      // EXP 는 레벨업 연출용이라 실패해도 복습은 계속
+      totalExp().then((v) => (exp = v)).catch(() => (exp = null))
       deck = d
       settings = deckSettings(d)
       queue = new StudyQueue(cards, notes, logs, settings, dayEnd())
@@ -128,12 +138,24 @@
       queue.applyReview(before, next)
       const leechSuspended = await checkLeech(before, next)
       undoStack.push({ w, touched, leechSuspended })
+      gainExp(g)
       doneToday++
       await advance()
     } catch (e) {
       toast('저장 실패: ' + errorText(e), 'error')
     } finally {
       saving = false
+    }
+  }
+
+  function gainExp(g: Grade) {
+    if (exp === null) return
+    const before = levelFromExp(exp).level
+    exp += expForRating(g)
+    const after = levelFromExp(exp).level
+    if (after > before) {
+      levelUp = after
+      if (userId) markLevelSeen(userId, after)
     }
   }
 
@@ -162,6 +184,7 @@
     try {
       await undoReview(last.w)
       if (last.leechSuspended) await setSuspended(last.w.card.id, false)
+      if (exp !== null) exp -= expForRating(last.w.rating)
       queue.undo(last.w.card as CardRow, last.touched)
       doneToday--
       await advance()
@@ -188,6 +211,11 @@
 
   function onKey(e: KeyboardEvent) {
     if (e.isComposing || loading) return
+    if (levelUp !== null) {
+      // 레벨업 화면이 떠 있는 동안 키 입력은 닫기에만 씀
+      if (e.key === 'Enter' || e.key === ' ' || e.key === 'Escape') { e.preventDefault(); levelUp = null }
+      return
+    }
     if ((e.metaKey || e.ctrlKey) && e.key === 'z') { e.preventDefault(); undo(); return }
     const inInput = e.target instanceof HTMLInputElement
     if (!revealed) {
@@ -217,6 +245,10 @@
 </script>
 
 <svelte:window onkeydown={onKey} />
+
+{#if levelUp !== null}
+  <LevelUpOverlay level={levelUp} onclose={() => (levelUp = null)} />
+{/if}
 
 <TopBar back={`/deck/${deckId}`} title={deck ? `${deck.emoji} ${deck.name}` : ''}>
   <button class="btn small" onclick={undo} disabled={saving} aria-label="되돌리기" title="되돌리기 (Ctrl+Z)">↩️</button>
